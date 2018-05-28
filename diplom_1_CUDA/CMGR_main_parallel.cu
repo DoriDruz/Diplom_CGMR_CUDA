@@ -44,9 +44,16 @@ const int S = 134862;
 
 //global GPU
 const int block_size = 1;
-const int grid_size = 14;
+const int grid_size = 1;
 
 const int per_thread = S / grid_size * block_size;
+
+void clear_nevyazka() {
+	//clear file with nevyazka
+	ofstream nevyazka_file;
+	nevyazka_file.open("nevyazka.dat", ofstream::trunc);
+	nevyazka_file.close();
+}
 
 void add_in_file(double nev) {
 	ofstream nevyazka;
@@ -79,11 +86,20 @@ void create_matr(ifstream& file, double *matr, double size) {
 	}
 }
 
+//-------------------------------------------------------------------------------------------
+
 void show_vec(double *matr, double size) {
 	for (int i = 0; i < size; ++i) {
 		cout << setprecision(16) << matr[i] << "; ";
 	}
 	cout << endl;
+}
+
+__global__ void GPU_show_vec(double *matr, double size) {
+	printf("X: ");
+	for (int i = 0; i < size; ++i) {
+		printf("%.16f\n", matr[i]);
+	}
 }
 
 //-------------------------------------------------------------------------------------------
@@ -94,12 +110,13 @@ void mult_vec_on_num(double *vec, double num, double *res_vec) {
 	}
 }
 
-__global__ void GPU_mult_vec_on_num(double *vec, double num, double *res_vec) {
+__global__ void GPU_mult_vec_on_num(double *vec, double *num, double *res_vec) {
 	int thread = blockIdx.x * blockDim.x + threadIdx.x;
 
 	for (int i = thread * per_thread; i < (thread + 1) * per_thread; ++i) {
-		res_vec[i] = vec[i] * num;
+		res_vec[i] = __dmul_ru(vec[i],*num);
 	}
+	//printf("%.16f = %.16f * %.16f\n", res_vec[0], vec[0], *num);
 }
 
 //-------------------------------------------------------------------------------------------
@@ -136,27 +153,28 @@ __global__ void GPU_mult_A_on_alpha_E(double *matr, double alpha) {
 
 	for (int i = thread * per_thread; i < (thread + 1) * per_thread; ++i) {
 		if (i == 0) {
-			matr[i] = matr[i] + alpha;
+			matr[i] = __dadd_ru(matr[i], alpha);
 		}
 		else if (i > 0 && i < 247) {
-			matr[i * 7 + 1] = matr[i * 7 + 1] + alpha;
+			matr[i * 7 + 1] = __dadd_ru(matr[i * 7 + 1], alpha);
 		}
 		else if (i > 246 && i < 494) {
-			matr[i * 7 + 2] = matr[i * 7 + 2] + alpha;
+			matr[i * 7 + 2] = __dadd_ru(matr[i * 7 + 2], alpha);
 		}
 		else if (i > 493 && i < 134368) {
-			matr[i * 7 + 3] = matr[i * 7 + 3] + alpha;
+			matr[i * 7 + 3] = __dadd_ru(matr[i * 7 + 3], alpha);
 		}
 		else if (i > 134367 && i < 134615) {
-			matr[i * 7 + 4] = matr[i * 7 + 4] + alpha;
+			matr[i * 7 + 4] = __dadd_ru(matr[i * 7 + 4], alpha);
 		}
 		else if (i > 134614 && i < 134861) {
-			matr[i * 7 + 5] = matr[i * 7 + 5] + alpha;
+			matr[i * 7 + 5] = __dadd_ru(matr[i * 7 + 5], alpha);
 		}
 		else if (i == 134861) { //944034
-			matr[i * 7 + 6] = matr[i * 7 + 6] + alpha;
+			matr[i * 7 + 6] = __dadd_ru(matr[i * 7 + 6], alpha);
 		}
 	}
+	//printf("%.14f\n", matr[1]);
 }
 
 //-------------------------------------------------------------------------------------------
@@ -171,7 +189,7 @@ __global__ void GPU_sum_vec(double *vec_one, double *vec_two, double *res_vec) {
 	int thread = blockIdx.x * blockDim.x + threadIdx.x;
 
 	for (int i = thread * per_thread; i < (thread + 1) * per_thread; ++i) {
-		res_vec[i] = vec_one[i] + vec_two[i];
+		res_vec[i] = __dadd_ru(vec_one[i], vec_two[i]);
 	}
 }
 
@@ -187,7 +205,11 @@ __global__ void GPU_dif_vec(double *vec_one, double *vec_two, double *res_vec) {
 	int thread = blockIdx.x * blockDim.x + threadIdx.x;
 
 	for (int i = thread * per_thread; i < (thread + 1) * per_thread; ++i) {
-		res_vec[i] = vec_one[i] - vec_two[i];
+		res_vec[i] = __dsub_ru(vec_one[i], vec_two[i]);
+		//debug
+		/*if (i > S / 2 && i < S / 2 + 10) {
+			printf("%.14f = %.14f - %.14f\n", res_vec[i], vec_one[i], vec_two[i]);
+		}*/
 	}
 }
 
@@ -300,73 +322,79 @@ __global__ void GPU_matr_on_vec(double *matr, double *vec, double *res_vec) {
 	for (int i = thread * per_thread; i < (thread + 1) * per_thread; ++i) {
 		if (i == 0) {
 			res_vec[i] = \
-				matr[0] * vec[0] \
-				+ matr[1] * vec[1] \
-				+ matr[2] * vec[247] \
-				+ matr[3] * vec[494];
+				__dmul_rn(matr[0], vec[0]) \
+				+ __dmul_rn(matr[1], vec[1]) \
+				+ __dmul_rn(matr[2], vec[247]) \
+				+ __dmul_rn(matr[3], vec[494]);
 		}
 		else if (i > 0 && i < 247) {
 			res_vec[i] = \
-				matr[7 * i] * vec[second_count] \
-				+ matr[7 * i + 1] * vec[second_count + 1] \
-				+ matr[7 * i + 2] * vec[second_count + 2] \
-				+ matr[7 * i + 3] * vec[second_count + 248] \
-				+ matr[7 * i + 4] * vec[second_count + 495];
+				__dmul_rn(matr[7 * i],vec[second_count]) \
+				+ __dmul_rn(matr[7 * i + 1], vec[second_count + 1]) \
+				+ __dmul_rn(matr[7 * i + 2], vec[second_count + 2]) \
+				+ __dmul_rn(matr[7 * i + 3], vec[second_count + 248]) \
+				+ __dmul_rn(matr[7 * i + 4], vec[second_count + 495]);
 
 			second_count++;
 		}
 		else if (i > 246 && i < 494) {
 			res_vec[i] = \
-				matr[7 * i] * vec[third_count] \
-				+ matr[7 * i + 1] * vec[third_count + 246] \
-				+ matr[7 * i + 2] * vec[third_count + 247] \
-				+ matr[7 * i + 3] * vec[third_count + 248] \
-				+ matr[7 * i + 4] * vec[third_count + 494] \
-				+ matr[7 * i + 5] * vec[third_count + 741];
+				__dmul_rn(matr[7 * i], vec[third_count]) \
+				+ __dmul_rn(matr[7 * i + 1], vec[third_count + 246]) \
+				+ __dmul_rn(matr[7 * i + 2], vec[third_count + 247]) \
+				+ __dmul_rn(matr[7 * i + 3], vec[third_count + 248]) \
+				+ __dmul_rn(matr[7 * i + 4], vec[third_count + 494]) \
+				+ __dmul_rn(matr[7 * i + 5], vec[third_count + 741]);
 
 			third_count++;
 		}
 		else if (i > 493 && i < 134368) {
 			res_vec[i] = \
-				matr[7 * i] * vec[fourth_count] \
-				+ matr[7 * i + 1] * vec[fourth_count + 247] \
-				+ matr[7 * i + 2] * vec[fourth_count + 493] \
-				+ matr[7 * i + 3] * vec[fourth_count + 494] \
-				+ matr[7 * i + 4] * vec[fourth_count + 495] \
-				+ matr[7 * i + 5] * vec[fourth_count + 741] \
-				+ matr[7 * i + 6] * vec[fourth_count + 988];
+				__dmul_rn(matr[7 * i], vec[fourth_count]) \
+				+ __dmul_rn(matr[7 * i + 1], vec[fourth_count + 247]) \
+				+ __dmul_rn(matr[7 * i + 2], vec[fourth_count + 493]) \
+				+ __dmul_rn(matr[7 * i + 3], vec[fourth_count + 494]) \
+				+ __dmul_rn(matr[7 * i + 4], vec[fourth_count + 495]) \
+				+ __dmul_rn(matr[7 * i + 5], vec[fourth_count + 741]) \
+				+ __dmul_rn(matr[7 * i + 6], vec[fourth_count + 988]);
 
 			fourth_count++;
 		}
 		else if (i > 134367 && i < 134615) {
 			res_vec[i] = \
-				matr[7 * i + 1] * vec[fifth_count + 133874] \
-				+ matr[7 * i + 2] * vec[fifth_count + 134121] \
-				+ matr[7 * i + 3] * vec[fifth_count + 134367] \
-				+ matr[7 * i + 4] * vec[fifth_count + 134368] \
-				+ matr[7 * i + 5] * vec[fifth_count + 134369] \
-				+ matr[7 * i + 6] * vec[fifth_count + 134615];
+				__dmul_rn(matr[7 * i + 1], vec[fifth_count + 133874]) \
+				+ __dmul_rn(matr[7 * i + 2], vec[fifth_count + 134121]) \
+				+ __dmul_rn(matr[7 * i + 3], vec[fifth_count + 134367]) \
+				+ __dmul_rn(matr[7 * i + 4], vec[fifth_count + 134368]) \
+				+ __dmul_rn(matr[7 * i + 5], vec[fifth_count + 134369]) \
+				+ __dmul_rn(matr[7 * i + 6], vec[fifth_count + 134615]);
 
 			fifth_count++;
 		}
 		else if (i > 134614 && i < 134861) {
 			res_vec[i] = \
-				matr[7 * i + 2] * vec[sixth_count + 134121] \
-				+ matr[7 * i + 3] * vec[sixth_count + 134368] \
-				+ matr[7 * i + 4] * vec[sixth_count + 134614] \
-				+ matr[7 * i + 5] * vec[sixth_count + 134615] \
-				+ matr[7 * i + 6] * vec[sixth_count + 134616];
+				__dmul_rn(matr[7 * i + 2], vec[sixth_count + 134121]) \
+				+ __dmul_rn(matr[7 * i + 3], vec[sixth_count + 134368]) \
+				+ __dmul_rn(matr[7 * i + 4], vec[sixth_count + 134614]) \
+				+ __dmul_rn(matr[7 * i + 5], vec[sixth_count + 134615]) \
+				+ __dmul_rn(matr[7 * i + 6], vec[sixth_count + 134616]);
 
 			sixth_count++;
 		}
 		else if (i == 134861) { //last_element_position = 944034
 			res_vec[i] = \
-				matr[7 * i + 3] * vec[134367] \
-				+ matr[7 * i + 4] * vec[134614] \
-				+ matr[7 * i + 5] * vec[134860] \
-				+ matr[7 * i + 6] * vec[134861];
+				__dmul_rn(matr[7 * i + 3], vec[134367]) \
+				+ __dmul_rn(matr[7 * i + 4], vec[134614]) \
+				+ __dmul_rn(matr[7 * i + 5], vec[134860]) \
+				+ __dmul_rn(matr[7 * i + 6], vec[134861]);
 		}
 	}
+	/*for (int i = 0; i < 1; ++i) {
+		printf("res_vec[i]: %.14f =\n matr[0] %.14f * vec[0] %.14f \n + matr[1] %.14f * vec[1] %.14f \n + matr[2] %.14f * vec[247] %.14f \n + matr[3] %.14f * vec[494] %.14f \n",
+			res_vec[i], matr[0], vec[0], matr[1], vec[1], matr[2], vec[247], matr[3], vec[494]);
+	}*/
+	//printf("res_vec[i]: %.14f =\n matr[0] %.14f * vec[0] %.14f \n + matr[1] %.14f * vec[1] %.14f \n + matr[2] %.14f * vec[247] %.14f \n + matr[3] %.14f * vec[494] %.14f \n",
+	//	res_vec[0], matr[0], vec[0], matr[1], vec[1], matr[2], vec[247], matr[3], vec[494]);
 }
 
 //-------------------------------------------------------------------------------------------
@@ -379,17 +407,18 @@ double vec_on_vec(double *vec_one, double *vec_two) {
 	return res;
 }
 
-//__device__ double *res_GPU_vec_on_vec; //! не забыть про host > dev / dev > host !
+//__device__ double *res_GPU_vec_on_vec;
 
 __global__ void GPU_vec_on_vec(double *vec_one, double *vec_two, double *res) {
 	int thread = blockIdx.x * blockDim.x + threadIdx.x;
 	double tmp_res_per_thread = 0;
-	
-	for (int i = thread * per_thread; i < (thread + 1) * per_thread; ++i) {
-		tmp_res_per_thread += vec_one[i] * vec_two[i];
-	}
+	*res = 0;
 
+	for (int i = thread * per_thread; i < (thread + 1) * per_thread; ++i) {
+		tmp_res_per_thread += __dmul_rn(vec_one[i], vec_two[i]);
+	}
 	atomicAdd(res, tmp_res_per_thread);
+	//printf("%.14f = %.14f = %.14f + %.14f\n", *res, tmp_res_per_thread, vec_one[0], vec_two[0]);
 }
 
 //-------------------------------------------------------------------------------------------
@@ -402,16 +431,23 @@ double norm_vec(double *vec) {
 	return sqrt(res);
 }
 
-//__device__ double *res_GPU_norm_vec; //! не забыть про host > dev / dev > host ! и sqrt!
+//__device__ double *res_GPU_norm_vec;
 
 __global__ void GPU_norm_vec(double *vec, double *res) {
 	int thread = blockIdx.x * blockDim.x + threadIdx.x;
 	double tmp_res_per_thread = 0;
+	*res = 0;
 
 	for (int i = thread * per_thread; i < (thread + 1) * per_thread; ++i) {
-		tmp_res_per_thread += powf(vec[i], 2);
+		//tmp_res_per_thread += powf(vec[i], 2);
+		*res += __dmul_rn(vec[i], vec[i]); // vec[i]* vec[i];
+		/*if (i > S/2 && i < S/2 + 10) {
+			printf("%.14f += %.14f, ^2: %.14f\n", *res, vec[i], vec[i] * vec[i]);
+		}*/
 	}
-	atomicAdd(res, tmp_res_per_thread);
+	*res = __dsqrt_ru(*res);
+	//atomicAdd(res, tmp_res_per_thread);
+	//printf("%.14f += %.14f, ^2: %.14f\n", *res, vec[S - 1], vec[S - 1] * vec[S - 1]);
 }
 
 //-------------------------------------------------------------------------------------------
@@ -428,6 +464,7 @@ __global__ void GPU_copy_vec(double *matr_one, double *matr_two) {
 	for (int i = thread * per_thread; i < (thread + 1) * per_thread; ++i) {
 		matr_one[i] = matr_two[i];
 	}
+	//printf("%.14f\n", matr_one[0]);
 }
 
 //-------------------------------------------------------------------------------------------
@@ -448,122 +485,124 @@ __global__ void GPU_nullify(double *vec) {
 
 //-------------------------------------------------------------------------------------------
 
-__global__ void GPU_null_one(double *vec) {
-	vec = NULL;
+//void check_stop(double *A, double *F, double *X, double result) {
+//	double *stop_up = new double[1];
+//	double *stop_down = new double[1];
+//	double *stop_vec = new double[S];
+//	double *stop_tmp = new double[S];
+//
+//	stop_up[0] = stop_down[0] = 0;
+//
+//	//host
+//	/*matr_on_vec(A, X, stop_tmp);
+//	dif_vec(stop_tmp, F, stop_vec);
+//	stop_up = norm_vec(stop_vec);
+//	stop_down = norm_vec(F);*/
+//
+//	//device
+//	double *devA = NULL;
+//	double *devF = NULL;
+//	double *devX = NULL;
+//	double *dev_stop_tmp = NULL;
+//	double *dev_stop_vec = NULL;
+//	double *dev_stop_up = NULL;
+//	double *dev_stop_down = NULL;
+//
+//	CUDA_CALL(cudaMalloc(&devA, S * 7 * sizeof(double)));
+//	CUDA_CALL(cudaMalloc(&devF, S * sizeof(double)));
+//	CUDA_CALL(cudaMalloc(&devX, S * sizeof(double)));
+//	CUDA_CALL(cudaMalloc(&dev_stop_tmp, S * sizeof(double)));
+//	CUDA_CALL(cudaMalloc(&dev_stop_vec, S * sizeof(double)));
+//	CUDA_CALL(cudaMalloc(&dev_stop_up, 1 * sizeof(double)));
+//	CUDA_CALL(cudaMalloc(&dev_stop_down, 1 * sizeof(double)));
+//
+//	CUDA_CALL(cudaMemcpy(devA, A, S * 7 * sizeof(double), cudaMemcpyHostToDevice));
+//	CUDA_CALL(cudaMemcpy(devF, F, S * sizeof(double), cudaMemcpyHostToDevice));
+//	CUDA_CALL(cudaMemcpy(devX, X, S * sizeof(double), cudaMemcpyHostToDevice));
+//	CUDA_CALL(cudaMemcpy(dev_stop_tmp, stop_tmp, S * sizeof(double), cudaMemcpyHostToDevice));
+//	CUDA_CALL(cudaMemcpy(dev_stop_vec, stop_vec, S * sizeof(double), cudaMemcpyHostToDevice));
+//	CUDA_CALL(cudaMemcpy(dev_stop_up, stop_up, 1 * sizeof(double), cudaMemcpyHostToDevice));
+//	CUDA_CALL(cudaMemcpy(dev_stop_down, stop_down, 1 * sizeof(double), cudaMemcpyHostToDevice));
+//
+//	GPU_matr_on_vec<<<block_size, grid_size>>>(devA, devX, dev_stop_tmp);
+//	CUDA_CALL(cudaDeviceSynchronize());
+//
+//	GPU_dif_vec<<<block_size, grid_size>>>(dev_stop_tmp, devF, dev_stop_vec);
+//	CUDA_CALL(cudaDeviceSynchronize());
+//
+//	//CUDA_CALL(cudaMemset(res_GPU_norm_vec, 0, sizeof(double)));
+//	GPU_norm_vec<<<block_size, grid_size>>>(dev_stop_vec, dev_stop_up);
+//	CUDA_CALL(cudaDeviceSynchronize());
+//	//CUDA_CALL(cudaMemcpyFromSymbol(&stop_up, "res_GPU_norm_vec", sizeof(double), 0, cudaMemcpyDeviceToHost));
+//	CUDA_CALL(cudaMemcpy(stop_up, dev_stop_up, 1 * sizeof(double), cudaMemcpyDeviceToHost));
+//	stop_up[0] = sqrt(stop_up[0]);
+//
+//	//CUDA_CALL(cudaMemset(res_GPU_norm_vec, 0, sizeof(double)));
+//	GPU_norm_vec<<<block_size, grid_size>>>(devF, dev_stop_down);
+//	CUDA_CALL(cudaDeviceSynchronize());
+//	//CUDA_CALL(cudaMemcpyFromSymbol(&stop_down, "res_GPU_norm_vec", sizeof(double), 0, cudaMemcpyDeviceToHost));
+//	CUDA_CALL(cudaMemcpy(stop_down, dev_stop_down, 1 * sizeof(double), cudaMemcpyDeviceToHost));
+//	stop_down[0] = sqrt(stop_down[0]);
+//
+//	CUDA_CALL(cudaGetLastError());
+//
+//	cudaFree(devA);
+//	cudaFree(devF);
+//	cudaFree(devX);
+//	cudaFree(dev_stop_tmp);
+//	cudaFree(dev_stop_vec);
+//	cudaFree(dev_stop_up);
+//	cudaFree(dev_stop_down);
+//
+//	delete(stop_vec);
+//	delete(stop_tmp);
+//	delete(stop_up);
+//	delete(stop_down);
+//
+//
+//	result = (double)(stop_up[0] / stop_down[0]);
+//}
+
+//double check_stop2(double *A, double *F, double *X) {
+//	double stop_up = 0;
+//	double stop_down = 0;
+//	double *stop_vec = new double[S];
+//	double *stop_tmp = new double[S];
+//
+//	matr_on_vec(A, X, stop_tmp);
+//	dif_vec(stop_tmp, F, stop_vec);
+//	stop_up = norm_vec(stop_vec);
+//	stop_down = norm_vec(F);
+//
+//	delete(stop_vec);
+//	delete(stop_tmp);
+//
+//	return stop_up / stop_down;
+//}
+
+__global__ void GPU_ak_bk(double *up, double *down, double *ak_bk) {
+	//printf("up and down: %f, %f\n", *up, *down);
+	//*ak_bk = __ddiv_rn(*up, *down);
+	*ak_bk = __ddiv_ru(*up, *down);
+	//printf("ak_bk: %.16f\n", *ak_bk);
 }
 
-//-------------------------------------------------------------------------------------------
+//__device__ double GPU_stop;
 
-double check_stop(double *A, double *F, double *X) {
-	double *stop_up = new double[1];
-	double *stop_down = new double[1];
-	double *stop_vec = new double[S];
-	double *stop_tmp = new double[S];
-
-	stop_up[0] = stop_down[0] = 0;
-
-	//host
-	/*matr_on_vec(A, X, stop_tmp);
-	dif_vec(stop_tmp, F, stop_vec);
-	stop_up = norm_vec(stop_vec);
-	stop_down = norm_vec(F);*/
-
-	//device
-	double *devA = NULL;
-	double *devF = NULL;
-	double *devX = NULL;
-	double *dev_stop_tmp = NULL;
-	double *dev_stop_vec = NULL;
-	double *dev_stop_up = NULL;
-	double *dev_stop_down = NULL;
-
-	CUDA_CALL(cudaMalloc(&devA, S * 7 * sizeof(double)));
-	CUDA_CALL(cudaMalloc(&devF, S * sizeof(double)));
-	CUDA_CALL(cudaMalloc(&devX, S * sizeof(double)));
-	CUDA_CALL(cudaMalloc(&dev_stop_tmp, S * sizeof(double)));
-	CUDA_CALL(cudaMalloc(&dev_stop_vec, S * sizeof(double)));
-	CUDA_CALL(cudaMalloc(&dev_stop_up, 1 * sizeof(double)));
-	CUDA_CALL(cudaMalloc(&dev_stop_down, 1 * sizeof(double)));
-
-	CUDA_CALL(cudaMemcpy(devA, A, S * 7 * sizeof(double), cudaMemcpyHostToDevice));
-	CUDA_CALL(cudaMemcpy(devF, F, S * sizeof(double), cudaMemcpyHostToDevice));
-	CUDA_CALL(cudaMemcpy(devX, X, S * sizeof(double), cudaMemcpyHostToDevice));
-	CUDA_CALL(cudaMemcpy(dev_stop_tmp, stop_tmp, S * sizeof(double), cudaMemcpyHostToDevice));
-	CUDA_CALL(cudaMemcpy(dev_stop_vec, stop_vec, S * sizeof(double), cudaMemcpyHostToDevice));
-	CUDA_CALL(cudaMemcpy(dev_stop_up, stop_up, 1 * sizeof(double), cudaMemcpyHostToDevice));
-	CUDA_CALL(cudaMemcpy(dev_stop_down, stop_down, 1 * sizeof(double), cudaMemcpyHostToDevice));
-
-	GPU_matr_on_vec<<<block_size, grid_size>>>(devA, devX, dev_stop_tmp);
-	//CUDA_CALL(cudaDeviceSynchronize());
-
-	GPU_dif_vec<<<block_size, grid_size>>>(dev_stop_tmp, devF, dev_stop_vec);
-	//CUDA_CALL(cudaDeviceSynchronize());
-
-	//CUDA_CALL(cudaMemset(res_GPU_norm_vec, 0, sizeof(double)));
-	GPU_norm_vec<<<block_size, grid_size>>>(dev_stop_vec, dev_stop_up);
-	//CUDA_CALL(cudaDeviceSynchronize());
-	//CUDA_CALL(cudaMemcpyFromSymbol(&stop_up, "res_GPU_norm_vec", sizeof(double), 0, cudaMemcpyDeviceToHost));
-	CUDA_CALL(cudaMemcpy(stop_up, dev_stop_up, 1 * sizeof(double), cudaMemcpyDeviceToHost));
-	stop_up[0] = sqrt(stop_up[0]);
-
-	//CUDA_CALL(cudaMemset(res_GPU_norm_vec, 0, sizeof(double)));
-	GPU_norm_vec<<<block_size, grid_size>>>(devF, dev_stop_down);
-	//CUDA_CALL(cudaDeviceSynchronize());
-	//CUDA_CALL(cudaMemcpyFromSymbol(&stop_down, "res_GPU_norm_vec", sizeof(double), 0, cudaMemcpyDeviceToHost));
-	CUDA_CALL(cudaMemcpy(stop_down, dev_stop_down, 1 * sizeof(double), cudaMemcpyDeviceToHost));
-	stop_down[0] = sqrt(stop_down[0]);
-
-	CUDA_CALL(cudaGetLastError());
-
-	cudaFree(devA);
-	cudaFree(devF);
-	cudaFree(devX);
-	cudaFree(dev_stop_tmp);
-	cudaFree(dev_stop_vec);
-	cudaFree(dev_stop_up);
-	cudaFree(dev_stop_down);
-
-	delete(stop_vec);
-	delete(stop_tmp);
-	delete(stop_up);
-	delete(stop_down);
-
-
-	return stop_up[0] / stop_down[0];
+__global__ void GPU_check_nev(double *up, double *down, double *eps, double Eps, double *x_res) {
+	*eps = __ddiv_ru(*up, *down);
+	printf("Nev: %.16f %s 0.1\n\n", *eps, ((*eps < Eps) ? "<" : ">"));
+	if (*eps < Eps) {
+		return;
+	}
 }
 
 void CGMR(double *A, double *F, clock_t begin_algo) {
-	const double Eps = 0.1;
+	const double Eps = 0.001;
 
-	//to device from arguments
-	double *dev_A = NULL;
-	double *dev_F = NULL;
-
-	CUDA_CALL(cudaMalloc(&dev_A, S * 7 * sizeof(double)));
-	CUDA_CALL(cudaMalloc(&dev_F, S * sizeof(double)));
-
-	CUDA_CALL(cudaMemcpy(dev_A, A, S * 7 * sizeof(double), cudaMemcpyHostToDevice));
-	CUDA_CALL(cudaMemcpy(dev_F, F, S * sizeof(double), cudaMemcpyHostToDevice));
-
-	//double *rA = new double[S * 7];
 	double *x = new double[S];
 	double *r = new double[S];
 	double *p = new double[S];
-
-	double *dev_x = NULL;
-	double *dev_r = NULL;
-	double *dev_p = NULL;
-
-	CUDA_CALL(cudaMalloc(&dev_x, S * sizeof(double)));
-	CUDA_CALL(cudaMalloc(&dev_r, S * sizeof(double)));
-	CUDA_CALL(cudaMalloc(&dev_p, S * sizeof(double)));
-
-	//original A
-	double *or_A = new double[S * 7];
-
-	double *dev_or_A = NULL;
-
-	CUDA_CALL(cudaMalloc(&dev_or_A, S * 7 * sizeof(double)));
 
 	//coef in cycle
 	double ak = 0;
@@ -579,109 +618,128 @@ void CGMR(double *A, double *F, clock_t begin_algo) {
 	double *r_k1 = new double[S];
 	double *x_k1 = new double[S];
 	double *p_k1 = new double[S];
-	double stop_norm = 0;
-	double stop_norm2 = 0;
-	double *norm = new double[1];
-	double *norm2 = new double[1];
-	double *vov = new double[1];
-	double stop_eps = 1;
-
-	norm[0] = norm2[0] = vov[0] = 0;
-
-	int count_tmp = 0;
+	double up = 0;
+	double down = 0;
 	
+	int count_tmp = 0;
+
+	//to device from arguments
+	double *dev_A = NULL;
+	double *dev_F = NULL;
+
+	double *dev_x = NULL;
+	double *dev_r = NULL;
+	double *dev_p = NULL;
+		
+	double *dev_ak = NULL;
+	double *dev_bk;
+
 	double *dev_tmp = NULL;
 	double *dev_rApk = NULL;
-	double *dev_stop = NULL;
 	double *dev_r_k1 = NULL;
 	double *dev_x_k1 = NULL;
 	double *dev_p_k1 = NULL;
-	double *dev_norm = NULL;
-	double *dev_norm2 = NULL;
-	double *dev_vov = NULL;
+	double *dev_up = 0;
+	double *dev_down = 0;
+
+	//for stop_deal
+	double stop_up = 0;
+	double stop_down = 0;
+	double stop_eps = 1;
+	double *stop_vec = new double[S];
+	double *stop_tmp = new double[S];
+
+	double *dev_stop_up;
+	double *dev_stop_down;
+	double *dev_stop_eps;
+	double *dev_stop_tmp = NULL;
+	double *dev_stop_vec = NULL;
+
+	CUDA_CALL(cudaMalloc(&dev_A, S * 7 * sizeof(double)));
+	CUDA_CALL(cudaMalloc(&dev_F, S * sizeof(double)));
+
+	CUDA_CALL(cudaMalloc(&dev_x, S * sizeof(double)));
+	CUDA_CALL(cudaMalloc(&dev_r, S * sizeof(double)));
+	CUDA_CALL(cudaMalloc(&dev_p, S * sizeof(double)));
+
+	CUDA_CALL(cudaMalloc(&dev_ak, sizeof(double)));
+	CUDA_CALL(cudaMalloc(&dev_bk, sizeof(double)));
 
 	CUDA_CALL(cudaMalloc(&dev_tmp, S * sizeof(double)));
 	CUDA_CALL(cudaMalloc(&dev_rApk, S * sizeof(double)));
-	CUDA_CALL(cudaMalloc(&dev_stop, S * sizeof(double)));
 	CUDA_CALL(cudaMalloc(&dev_r_k1, S * sizeof(double)));
 	CUDA_CALL(cudaMalloc(&dev_x_k1, S * sizeof(double)));
 	CUDA_CALL(cudaMalloc(&dev_p_k1, S * sizeof(double)));
-	CUDA_CALL(cudaMalloc(&dev_norm, 1 * sizeof(double)));
-	CUDA_CALL(cudaMalloc(&dev_norm2, 1 * sizeof(double)));
-	CUDA_CALL(cudaMalloc(&dev_vov, 1 * sizeof(double)));
+	CUDA_CALL(cudaMalloc(&dev_up, sizeof(double)));
+	CUDA_CALL(cudaMalloc(&dev_down, sizeof(double)));
 
-	//clear file with nevyazka
-	ofstream nevyazka_file;
-	nevyazka_file.open("nevyazka.dat", ofstream::trunc);
-	nevyazka_file.close();
-
-	//clear file with debug
-	ofstream debug_f;
-	debug_f.open("debug.dat", ofstream::trunc);
-	debug_f.close();
-
-	//ЗАНУЛИТЬ or_A?
+	CUDA_CALL(cudaMalloc(&dev_stop_up, sizeof(double)));
+	CUDA_CALL(cudaMalloc(&dev_stop_down, sizeof(double)));
+	CUDA_CALL(cudaMalloc(&dev_stop_eps, sizeof(double)));
+	CUDA_CALL(cudaMalloc(&dev_stop_tmp, S * sizeof(double)));
+	CUDA_CALL(cudaMalloc(&dev_stop_vec, S * sizeof(double)));
 
 	//fill all arrays with zeroes
 	clock_t begin_zero_filling = clock();
 	for (int i = 0; i < S; ++i) {
-		x[i] = r[i] = p[i] = 0;
-		rApk[i] = stop[i] = tmp[i] = r_k1[i] = x_k1[i] = p_k1[i] = 0;
+		x[i] = r[i] = p[i] = rApk[i] = tmp[i] = r_k1[i] = x_k1[i] = p_k1[i] = 0;
 	}
 	
+	CUDA_CALL(cudaMemcpy(dev_A, A, S * 7 * sizeof(double), cudaMemcpyHostToDevice));
+	CUDA_CALL(cudaMemcpy(dev_F, F, S * sizeof(double), cudaMemcpyHostToDevice));
+
 	CUDA_CALL(cudaMemcpy(dev_x, x, S * sizeof(double), cudaMemcpyHostToDevice));
 	CUDA_CALL(cudaMemcpy(dev_r, r, S * sizeof(double), cudaMemcpyHostToDevice));
 	CUDA_CALL(cudaMemcpy(dev_p, p, S * sizeof(double), cudaMemcpyHostToDevice));
+
+	CUDA_CALL(cudaMemcpy(dev_ak, &ak, sizeof(double), cudaMemcpyHostToDevice));
+	CUDA_CALL(cudaMemcpy(dev_bk, &bk, sizeof(double), cudaMemcpyHostToDevice));
+
 	CUDA_CALL(cudaMemcpy(dev_rApk, rApk, S * sizeof(double), cudaMemcpyHostToDevice));
-	CUDA_CALL(cudaMemcpy(dev_stop, stop, S * sizeof(double), cudaMemcpyHostToDevice));
 	CUDA_CALL(cudaMemcpy(dev_r_k1, r_k1, S * sizeof(double), cudaMemcpyHostToDevice));
 	CUDA_CALL(cudaMemcpy(dev_x_k1, x_k1, S * sizeof(double), cudaMemcpyHostToDevice));
 	CUDA_CALL(cudaMemcpy(dev_p_k1, p_k1, S * sizeof(double), cudaMemcpyHostToDevice));
 	CUDA_CALL(cudaMemcpy(dev_tmp, tmp, S * sizeof(double), cudaMemcpyHostToDevice));
-	CUDA_CALL(cudaMemcpy(dev_norm, norm, 1 * sizeof(double), cudaMemcpyHostToDevice));
-	CUDA_CALL(cudaMemcpy(dev_norm2, norm2, 1 * sizeof(double), cudaMemcpyHostToDevice));
-	CUDA_CALL(cudaMemcpy(dev_vov, vov, 1 * sizeof(double), cudaMemcpyHostToDevice));
+	CUDA_CALL(cudaMemcpy(dev_up, &up, sizeof(double), cudaMemcpyHostToDevice));
+	CUDA_CALL(cudaMemcpy(dev_down, &down, sizeof(double), cudaMemcpyHostToDevice));
+
+	CUDA_CALL(cudaMemcpy(dev_stop_up, &stop_up, sizeof(double), cudaMemcpyHostToDevice));
+	CUDA_CALL(cudaMemcpy(dev_stop_down, &stop_down, sizeof(double), cudaMemcpyHostToDevice));
+	CUDA_CALL(cudaMemcpy(dev_stop_eps, &stop_eps, sizeof(double), cudaMemcpyHostToDevice));
+	CUDA_CALL(cudaMemcpy(dev_stop_tmp, stop_tmp, S * sizeof(double), cudaMemcpyHostToDevice));
+	CUDA_CALL(cudaMemcpy(dev_stop_vec, stop_vec, S * sizeof(double), cudaMemcpyHostToDevice));
+	
+	//printf("Device Variable Copying:\t%s\n", cudaGetErrorString(cudaGetLastError()));
 
 	clock_t end_zero_filling = clock();
 
 	double z_time = double(end_zero_filling - begin_zero_filling) / CLOCKS_PER_SEC;
-	cout << "Zero_filling_preperation: " << z_time << endl;
+	cout << "Cuda.Malloc and Cuda.Memcpy completed in: " << z_time << endl;
 
 	clock_t begin_make_prep = clock();
 
 	//Подготовка перед алгоритмом
-
-	//copy A in or_A
-	//copy_matr(or_A, A);
 	
-	GPU_copy_matr<<<block_size, grid_size>>>(dev_or_A, dev_A);
-	//CUDA_CALL(cudaDeviceSynchronize());
-
 	//making const rA
 	//rA = A + alpha*E
-	//mult_A_on_alpha_E(A, alpha);
-
+	
 	GPU_mult_A_on_alpha_E<<<block_size, grid_size>>>(dev_A, alpha);
-	//CUDA_CALL(cudaDeviceSynchronize());
-
+	CUDA_CALL(cudaDeviceSynchronize());
+	
 	//r = b-rA*x0	|rA*x0 = 0| |r = b|
-	//copy_vec(r, F);
-
 	GPU_copy_vec<<<block_size, grid_size>>>(dev_r, dev_F);
-	//CUDA_CALL(cudaDeviceSynchronize());
-
+	CUDA_CALL(cudaDeviceSynchronize());
+	
 	//p = r;
-	//copy_vec(p, r);
-
 	GPU_copy_vec<<<block_size, grid_size>>>(dev_p, dev_r);
-	//CUDA_CALL(cudaDeviceSynchronize());
+	CUDA_CALL(cudaDeviceSynchronize());
 
 	clock_t end_make_prep = clock();
 
 	double p_time = double(end_make_prep - begin_make_prep) / CLOCKS_PER_SEC;
-	cout << "Preperation rA, r, p: " << p_time << endl << endl;
+	cout << "Before cycle preperations completed in: " << p_time << endl << endl;
 
-	//WHY NEVYAZKA INCREASING ? - Different data in arrays? Make zero iter out of cycle?
+	// ! УБРАТЬ ВСЕ ПЕРЕХОДЫ НА ПРОЦ С ВИДЕОКАРТЫ В ЦИКЛЕ !
 
 	while (!(stop_eps < Eps) && count_tmp < S) {
 
@@ -695,69 +753,49 @@ void CGMR(double *A, double *F, clock_t begin_algo) {
 
 		//ak = norm(r_k)^2 / (rA*p_k, p_k)
 		//norm(r_k)^2
-		//norm = pow(norm_vec(r), 2);
 		//norm = vec_on_vec(r, r);
 
-		//CUDA_CALL(cudaMemset(res_GPU_vec_on_vec, 0, sizeof(double)));
-		GPU_null_one<<<1,1>>>(dev_norm);
-		GPU_vec_on_vec<<<block_size, grid_size>>>(dev_r, dev_r, dev_norm);
+		GPU_vec_on_vec<<<block_size, grid_size>>>(dev_r, dev_r, dev_up);
 		//CUDA_CALL(cudaDeviceSynchronize());
-		CUDA_CALL(cudaMemcpy(norm, dev_norm, 1 * sizeof(double), cudaMemcpyDeviceToHost));
-		//CUDA_CALL(cudaMemcpyFromSymbol(&norm, "res_GPU_vec_on_vec", sizeof(double), 0, cudaMemcpyDeviceToHost));
 		
 		//-------------------------------------------------------------------------------------------
 
 		//rA*p_k
-		//matr_on_vec(A, p, rApk);
-
 		GPU_matr_on_vec<<<block_size, grid_size>>>(dev_A, dev_p, dev_rApk);
 		//CUDA_CALL(cudaDeviceSynchronize());
 
 		//(rA*p_k, p_k)
-		//vov = vec_on_vec(rApk, p);
 
-		//CUDA_CALL(cudaMemset(res_GPU_vec_on_vec, 0, sizeof(double)));
-		GPU_null_one<<<1, 1>>>(dev_vov);
-		GPU_vec_on_vec<<<block_size, grid_size>>>(dev_rApk, dev_p, dev_vov);
+		GPU_vec_on_vec<<<block_size, grid_size>>>(dev_rApk, dev_p, dev_down);
 		//CUDA_CALL(cudaDeviceSynchronize());
-		CUDA_CALL(cudaMemcpy(vov, dev_vov, 1 * sizeof(double), cudaMemcpyDeviceToHost));
-		//CUDA_CALL(cudaMemcpyFromSymbol(&vov, "res_GPU_vec_on_vec", sizeof(double), 0, cudaMemcpyDeviceToHost));
 
 		//ak = ...
-		ak = (isnan(norm[0] / vov[0]) ? 0 : (norm[0] / vov[0]));
-
+		GPU_ak_bk<<<block_size, grid_size>>>(dev_up, dev_down, dev_ak);
+		//CUDA_CALL(cudaDeviceSynchronize());
 		//-------------------------------------------------------------------------------------------
 
 		//r_k+1 = r_k - ak*rA*p_k
 		//ak*(rA*p_k)
-		//mult_vec_on_num(rApk, ak, tmp);
-
-		GPU_mult_vec_on_num<<<block_size, grid_size>>>(dev_rApk, ak, dev_tmp);
+		
+		GPU_mult_vec_on_num<<<block_size, grid_size>>>(dev_rApk, dev_ak, dev_tmp);
 		//CUDA_CALL(cudaDeviceSynchronize());
 
 		//r_k+1 = r_k - ...
-		//dif_vec(r, tmp, r_k1);
-
 		GPU_dif_vec<<<block_size, grid_size>>>(dev_r, dev_tmp, dev_r_k1);
 		//CUDA_CALL(cudaDeviceSynchronize());
 
 		//-------------------------------------------------------------------------------------------
 
 		//nullify(tmp);
-
 		GPU_nullify<<<block_size, grid_size>>>(dev_tmp);
 		//CUDA_CALL(cudaDeviceSynchronize());
 
 		//x_k+1 = x_k + ak*p_k
 		//ak*p_k
-		//mult_vec_on_num(p, ak, tmp);
-
-		GPU_mult_vec_on_num<<<block_size, grid_size>>>(dev_p, ak, dev_tmp);
+		GPU_mult_vec_on_num<<<block_size, grid_size>>>(dev_p, dev_ak, dev_tmp);
 		//CUDA_CALL(cudaDeviceSynchronize());
 
 		//x_k+1 = x_k + ...
-		//sum_vec(x, tmp, x_k1);
-
 		GPU_sum_vec<<<block_size, grid_size>>>(dev_x, dev_tmp, dev_x_k1);
 		//CUDA_CALL(cudaDeviceSynchronize());
 
@@ -765,29 +803,16 @@ void CGMR(double *A, double *F, clock_t begin_algo) {
 
 		//bk = norm(r_k+1)^2 / norm(r_k)^2
 		//norm(r_k+1)^2
-		//norm = pow(norm_vec(r_k1), 2);
-		//norm = vec_on_vec(r_k1, r_k1);
-
-		//CUDA_CALL(cudaMemset(res_GPU_vec_on_vec, 0, sizeof(double)));
-		GPU_null_one<<<1, 1>>>(dev_norm);
-		GPU_vec_on_vec<<<block_size, grid_size>>>(dev_r_k1, dev_r_k1, dev_norm);
+		GPU_vec_on_vec<<<block_size, grid_size>>>(dev_r_k1, dev_r_k1, dev_up);
 		//CUDA_CALL(cudaDeviceSynchronize());
-		CUDA_CALL(cudaMemcpy(norm, dev_norm, 1 * sizeof(double), cudaMemcpyDeviceToHost));
-		//CUDA_CALL(cudaMemcpyFromSymbol(&norm, "res_GPU_vec_on_vec", sizeof(double), 0, cudaMemcpyDeviceToHost));
-
+		
 		//norm(r_k)^2
-		//norm2 = pow(norm_vec(r), 2);
-		//norm2 = vec_on_vec(r, r);
-
-		//CUDA_CALL(cudaMemset(res_GPU_vec_on_vec, 0, sizeof(double)));
-		GPU_null_one<<<1, 1>>>(dev_norm2);
-		GPU_vec_on_vec<<<block_size, grid_size>>>(dev_r, dev_r, dev_norm2);
+		GPU_vec_on_vec<<<block_size, grid_size>>>(dev_r, dev_r, dev_down);
 		//CUDA_CALL(cudaDeviceSynchronize());
-		CUDA_CALL(cudaMemcpy(norm2, dev_norm2, 1 * sizeof(double), cudaMemcpyDeviceToHost));
-		//CUDA_CALL(cudaMemcpyFromSymbol(&norm2, "res_GPU_vec_on_vec", sizeof(double), 0, cudaMemcpyDeviceToHost));
 
 		//bk = ...
-		bk = (isnan(norm[0] / norm2[0]) ? 0 : (norm[0] / norm2[0]));
+		GPU_ak_bk<<<1, 1>>>(dev_up, dev_down, dev_bk);
+		//CUDA_CALL(cudaDeviceSynchronize());
 
 		//-------------------------------------------------------------------------------------------
 
@@ -798,32 +823,46 @@ void CGMR(double *A, double *F, clock_t begin_algo) {
 
 		//p_k+1 = r_k+1 + bk*p_k
 		//bk*p_k
-		//mult_vec_on_num(p, bk, tmp);
 
-		GPU_mult_vec_on_num<<<block_size, grid_size>>>(dev_p, bk, dev_tmp);
+		GPU_mult_vec_on_num<<<block_size, grid_size>>>(dev_p, dev_bk, dev_tmp);
 		//CUDA_CALL(cudaDeviceSynchronize());
 
 		//p_k+1 = r_k+1 + ...
-		//sum_vec(r_k1, tmp, p_k1);
 
 		GPU_sum_vec<<<block_size, grid_size>>>(dev_r_k1, dev_tmp, dev_p_k1);
 		//CUDA_CALL(cudaDeviceSynchronize());
 
 		//-------------------------------------------------------------------------------------------
-
-		CUDA_CALL(cudaMemcpy(x_k1, dev_x_k1, S * sizeof(double), cudaMemcpyDeviceToHost));
-		CUDA_CALL(cudaDeviceSynchronize());
-		cout << "X[0]: " << endl;
-		show_vec(x_k1, 1);
 		
-		CUDA_CALL(cudaMemcpy(A, dev_A, S * 7 * sizeof(double), cudaMemcpyDeviceToHost));
-		CUDA_CALL(cudaDeviceSynchronize());
-		stop_eps = check_stop(A, F, x_k1);
+		//CUDA_CALL(cudaDeviceSynchronize());
+		GPU_show_vec<<<block_size, grid_size>>>(dev_x_k1, 1);
+		
+		//-------------------------------------------------------------------------------------------
 
-		add_in_file(stop_eps);
+		//check_stop(A, F, x_k1, stop_eps);
+		
+		GPU_matr_on_vec<<<block_size, grid_size>>>(dev_A, dev_x_k1, dev_stop_tmp);
+		//CUDA_CALL(cudaDeviceSynchronize());
 
-		cout << "Nev: " << stop_eps << " " << ((stop_eps < Eps) ? "<" : ">") << " " << Eps << endl << endl;
+		GPU_dif_vec<<<block_size, grid_size>>>(dev_stop_tmp, dev_F, dev_stop_vec);
+		//CUDA_CALL(cudaDeviceSynchronize());
+		
+		GPU_norm_vec<<<block_size, grid_size>>>(dev_stop_vec, dev_stop_up);
+		//CUDA_CALL(cudaDeviceSynchronize());
+
+		GPU_norm_vec<<<block_size, grid_size>>>(dev_F, dev_stop_down);
+		//CUDA_CALL(cudaDeviceSynchronize());
+
+		GPU_check_nev<<<block_size, grid_size>>>(dev_stop_up, dev_stop_down, dev_stop_eps, Eps, dev_x_k1);
+		//CUDA_CALL(cudaDeviceSynchronize());
+		
+		//CUDA_CALL(cudaMemcpy(&stop_eps, dev_stop_eps, sizeof(double), cudaMemcpyDeviceToHost));
+		//CUDA_CALL(cudaDeviceSynchronize());
+		//add_in_file(stop_eps);
+		
 		if (stop_eps < Eps || count_tmp > S - 1) {
+			CUDA_CALL(cudaMemcpy(x_k1, dev_x_k1, S * sizeof(double), cudaMemcpyDeviceToHost));
+			CUDA_CALL(cudaDeviceSynchronize());
 			write_in_file(x_k1, S, "X_1.dat");
 		}
 
@@ -831,17 +870,14 @@ void CGMR(double *A, double *F, clock_t begin_algo) {
 
 		//copy for next iter
 		//p = p_k1;
-		//copy_vec(p, p_k1);
 		GPU_copy_vec<<<block_size, grid_size>>>(dev_p, dev_p_k1);
 		//CUDA_CALL(cudaDeviceSynchronize());
 
 		//x = x_k1;
-		//copy_vec(x, x_k1);
 		GPU_copy_vec<<<block_size, grid_size>>>(dev_x, dev_x_k1);
 		//CUDA_CALL(cudaDeviceSynchronize());
 
 		//r = r_k1;
-		//copy_vec(r, r_k1);
 		GPU_copy_vec<<<block_size, grid_size>>>(dev_r, dev_r_k1);
 		//CUDA_CALL(cudaDeviceSynchronize());
 
@@ -853,26 +889,24 @@ void CGMR(double *A, double *F, clock_t begin_algo) {
 		//nullify(tmp);
 		//nullify(rApk);
 
-		GPU_nullify<<<block_size, grid_size>>>(dev_stop);
+		//GPU_nullify<<<block_size, grid_size>>>(dev_stop);
 		//CUDA_CALL(cudaDeviceSynchronize());
 		
-		GPU_nullify<<<block_size, grid_size>>>(dev_p_k1);
+		//GPU_nullify<<<block_size, grid_size>>>(dev_p_k1);
 		//CUDA_CALL(cudaDeviceSynchronize());
 
-		GPU_nullify<<<block_size, grid_size>>>(dev_x_k1);
+		//GPU_nullify<<<block_size, grid_size>>>(dev_x_k1);
 		//CUDA_CALL(cudaDeviceSynchronize());
 
-		GPU_nullify<<<block_size, grid_size>>>(dev_r_k1);
+		//GPU_nullify<<<block_size, grid_size>>>(dev_r_k1);
 		//CUDA_CALL(cudaDeviceSynchronize());
 
-		GPU_nullify<<<block_size, grid_size>>>(dev_tmp);
+		//GPU_nullify<<<block_size, grid_size>>>(dev_tmp);
 		//CUDA_CALL(cudaDeviceSynchronize());
 
-		GPU_nullify<<<block_size, grid_size>>>(dev_rApk);
+		//GPU_nullify<<<block_size, grid_size>>>(dev_rApk);
 		//CUDA_CALL(cudaDeviceSynchronize());
-
-		CUDA_CALL(cudaGetLastError());
-
+		
 		//-------------------------------------------------------------------------------------------
 
 		clock_t end_CGMR = clock();
@@ -884,6 +918,10 @@ void CGMR(double *A, double *F, clock_t begin_algo) {
 		double algo_time = double(end_algo - begin_algo) / CLOCKS_PER_SEC;
 		//cout << "Runtime of algo: " << algo_time << endl;
 	}
+	CUDA_CALL(cudaMemcpy(x_k1, dev_x_k1, S * sizeof(double), cudaMemcpyDeviceToHost));
+	CUDA_CALL(cudaDeviceSynchronize());
+	write_in_file(x_k1, S, "X_1.dat");
+
 	delete(x);
 	delete(r);
 	delete(p);
@@ -893,6 +931,8 @@ void CGMR(double *A, double *F, clock_t begin_algo) {
 	delete(tmp);
 	delete(rApk);
 	delete(stop);
+	delete(stop_vec);
+	delete(stop_tmp);
 
 	cudaFree(dev_x);
 	cudaFree(dev_r);
@@ -902,13 +942,20 @@ void CGMR(double *A, double *F, clock_t begin_algo) {
 	cudaFree(dev_p_k1);
 	cudaFree(dev_tmp);
 	cudaFree(dev_rApk);
-	cudaFree(dev_stop);
 	cudaFree(dev_A);
 	cudaFree(dev_F);
-	cudaFree(dev_or_A);
+	cudaFree(dev_ak);
+	cudaFree(dev_bk);
+	cudaFree(dev_up);
+	cudaFree(dev_down);
+	cudaFree(dev_stop_up);
+	cudaFree(dev_stop_down);
+	cudaFree(dev_stop_eps);
+	cudaFree(dev_stop_tmp);
+	cudaFree(dev_stop_vec);
 }
 
-void main() {
+int main() {
 	clock_t begin_algo = clock();
 
 	double *matr_A = new double[S * 7];
@@ -933,6 +980,8 @@ void main() {
 	A.close();
 	F.close();
 
+	clear_nevyazka();
+
 	CGMR(matr_A, matr_F, begin_algo);
 
 	clock_t end = clock();
@@ -942,7 +991,9 @@ void main() {
 	delete(matr_A);
 	delete(matr_F);
 
-	system("pause");
+	//system("pause");
+
+	return 0;
 
 	//На процессоре
 	//last runtime: 847.723 sec.
@@ -968,4 +1019,5 @@ void main() {
 	//! Посчитать с Eps = 10^-8 но без ограничения по количеству итераций !
 
 	//На видеокарте
+	//last runtime: 47.425 sec. / Iteration: 3 / Eps = 0.1 / Alpha = 0
 }
