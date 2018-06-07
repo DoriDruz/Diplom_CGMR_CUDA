@@ -43,8 +43,8 @@ using namespace std;
 const int S = 134862;
 
 //global GPU
-const int block_size = 1;
-const int grid_size = 1;
+const int block_size = 26;
+const int grid_size = 39;
 
 const int per_thread = S / (grid_size * block_size);
 
